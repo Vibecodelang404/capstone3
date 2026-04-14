@@ -2,14 +2,22 @@
 /**
  * Database Configuration
  * Singleton PDO connection with prepared statements
+ * Uses Dotenv library for environment variable management
  */
 
 declare(strict_types=1);
 
-class Database
-{
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use Ramsey\Uuid\Uuid;
+use Dotenv\Dotenv;
+
+if (!class_exists('Database')) {
+    class Database
+    {
     private static ?PDO $instance = null;
-    private static array $config = [];
+    private static bool $envLoaded = false;
+    private static string $logPath = __DIR__ . '/../logs/error.log';
 
     /**
      * Private constructor to prevent direct instantiation
@@ -19,38 +27,63 @@ class Database
     }
 
     /**
-     * Load environment variables from .env file
+     * Ensure logs directory exists
      */
-    private static function loadEnv(): void
+    private static function ensureLogDirectory(): void
     {
-        if (!empty(self::$config)) {
-            return;
-        }
-
-        $envFile = __DIR__ . '/../.env';
-        if (!file_exists($envFile)) {
-            $envFile = __DIR__ . '/../.env.example';
-        }
-
-        if (file_exists($envFile)) {
-            $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines as $line) {
-                if (strpos($line, '#') === 0) continue;
-                if (strpos($line, '=') === false) continue;
-                
-                list($key, $value) = explode('=', $line, 2);
-                self::$config[trim($key)] = trim($value);
-            }
+        $logDir = dirname(self::$logPath);
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0755, true);
         }
     }
 
     /**
-     * Get configuration value
+     * Log error message securely
+     */
+    private static function logError(string $message): void
+    {
+        self::ensureLogDirectory();
+        $timestamp = date('Y-m-d H:i:s');
+        $logMessage = "[{$timestamp}] {$message}\n";
+        error_log($logMessage, 3, self::$logPath);
+    }
+
+    /**
+     * Load environment variables from .env file using Dotenv library
+     */
+    private static function loadEnv(): void
+    {
+        if (self::$envLoaded) {
+            return;
+        }
+
+        $envPath = __DIR__ . '/..';
+
+        // Determine which .env file to use
+        $envFile = file_exists($envPath . '/.env') ? '.env' : '.env.example';
+
+        try {
+            $dotenv = Dotenv::createImmutable($envPath, $envFile);
+            $dotenv->load();
+            self::$envLoaded = true;
+        } catch (\Exception $e) {
+            if (getenv('APP_DEBUG') === 'true') {
+                throw new \Exception("Failed to load environment file: " . $e->getMessage());
+            }
+            // Silently continue if env loading fails - will use defaults
+            self::$envLoaded = true;
+        }
+    }
+
+    /**
+     * Get configuration value from environment variables
+     * Uses getenv() which reads from $_ENV populated by Dotenv
      */
     public static function getConfig(string $key, $default = null)
     {
         self::loadEnv();
-        return self::$config[$key] ?? $default;
+        $value = getenv($key);
+        return $value !== false ? $value : $default;
     }
 
     /**
@@ -61,11 +94,11 @@ class Database
         if (self::$instance === null) {
             self::loadEnv();
 
-            $host = self::$config['DB_HOST'] ?? 'localhost';
-            $port = self::$config['DB_PORT'] ?? '3306';
-            $dbname = self::$config['DB_NAME'] ?? 'inventory_pos';
-            $username = self::$config['DB_USER'] ?? 'root';
-            $password = self::$config['DB_PASS'] ?? '';
+            $host = self::getConfig('DB_HOST', 'localhost');
+            $port = self::getConfig('DB_PORT', '3306');
+            $dbname = self::getConfig('DB_NAME', 'inventory_pos');
+            $username = self::getConfig('DB_USER', 'root');
+            $password = self::getConfig('DB_PASS', '');
 
             $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
 
@@ -79,10 +112,19 @@ class Database
             try {
                 self::$instance = new PDO($dsn, $username, $password, $options);
             } catch (PDOException $e) {
-                if (self::getConfig('APP_DEBUG', 'false') === 'true') {
+                $isDebug = self::getConfig('APP_DEBUG', 'false') === 'true';
+
+                if ($isDebug) {
+                    // Development: expose detailed error message
                     throw new PDOException("Database connection failed: " . $e->getMessage());
+                } else {
+                    // Production: log detailed error securely, throw generic error to client
+                    self::logError(
+                        "Database Connection Error: " . $e->getMessage() . 
+                        " | Host: {$host} | Database: {$dbname} | User: {$username}"
+                    );
+                    throw new PDOException("Database connection failed");
                 }
-                throw new PDOException("Database connection failed");
             }
         }
 
@@ -90,15 +132,11 @@ class Database
     }
 
     /**
-     * Generate a UUID v4
+     * Generate a UUID v4 using Ramsey\Uuid
      */
     public static function generateUUID(): string
     {
-        $data = random_bytes(16);
-        $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
-        $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
-        
-        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+        return Uuid::uuid4()->toString();
     }
 
     /**
@@ -123,4 +161,5 @@ class Database
     {
         throw new \Exception("Cannot unserialize singleton");
     }
+}
 }

@@ -1,22 +1,42 @@
 <?php
 /**
  * JWT (JSON Web Token) Configuration and Utilities
+ * Uses Firebase\JWT\JWT for secure token encoding/decoding
  */
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/database.php';
+
+use Firebase\JWT\JWT as FirebaseJWT;
+use Firebase\JWT\Key;
 
 class JWT
 {
     private static string $algorithm = 'HS256';
+    private static ?string $secret = null;
 
     /**
      * Get JWT secret from environment
+     * @throws Exception if JWT_SECRET is not configured
      */
     private static function getSecret(): string
     {
-        return Database::getConfig('JWT_SECRET', 'default-secret-change-me');
+        if (self::$secret === null) {
+            $secret = Database::getConfig('JWT_SECRET');
+            
+            if (empty($secret)) {
+                throw new Exception(
+                    'FATAL: JWT_SECRET environment variable is not set. ' .
+                    'Please configure JWT_SECRET in your .env file for secure token generation.'
+                );
+            }
+            
+            self::$secret = $secret;
+        }
+        
+        return self::$secret;
     }
 
     /**
@@ -36,82 +56,29 @@ class JWT
     }
 
     /**
-     * Base64 URL encode
-     */
-    private static function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
-    }
-
-    /**
-     * Base64 URL decode
-     */
-    private static function base64UrlDecode(string $data): string
-    {
-        return base64_decode(strtr($data, '-_', '+/'));
-    }
-
-    /**
-     * Create a JWT token
+     * Create a JWT token using Firebase\JWT\JWT
      */
     public static function encode(array $payload): string
     {
-        $header = [
-            'typ' => 'JWT',
-            'alg' => self::$algorithm
-        ];
-
-        $headerEncoded = self::base64UrlEncode(json_encode($header));
-        $payloadEncoded = self::base64UrlEncode(json_encode($payload));
-
-        $signature = hash_hmac(
-            'sha256',
-            "{$headerEncoded}.{$payloadEncoded}",
-            self::getSecret(),
-            true
-        );
-        $signatureEncoded = self::base64UrlEncode($signature);
-
-        return "{$headerEncoded}.{$payloadEncoded}.{$signatureEncoded}";
+        try {
+            return FirebaseJWT::encode($payload, self::getSecret(), self::$algorithm);
+        } catch (\Exception $e) {
+            throw new \Exception("Failed to encode JWT: " . $e->getMessage());
+        }
     }
 
     /**
-     * Decode and verify a JWT token
+     * Decode and verify a JWT token using Firebase\JWT\JWT
      */
     public static function decode(string $token): ?array
     {
-        $parts = explode('.', $token);
-        if (count($parts) !== 3) {
+        try {
+            $decoded = FirebaseJWT::decode($token, new Key(self::getSecret(), self::$algorithm));
+            return (array) $decoded;
+        } catch (\Exception $e) {
+            // Token is invalid or expired - return null silently
             return null;
         }
-
-        [$headerEncoded, $payloadEncoded, $signatureEncoded] = $parts;
-
-        // Verify signature
-        $signature = self::base64UrlDecode($signatureEncoded);
-        $expectedSignature = hash_hmac(
-            'sha256',
-            "{$headerEncoded}.{$payloadEncoded}",
-            self::getSecret(),
-            true
-        );
-
-        if (!hash_equals($expectedSignature, $signature)) {
-            return null;
-        }
-
-        // Decode payload
-        $payload = json_decode(self::base64UrlDecode($payloadEncoded), true);
-        if (!$payload) {
-            return null;
-        }
-
-        // Check expiration
-        if (isset($payload['exp']) && $payload['exp'] < time()) {
-            return null;
-        }
-
-        return $payload;
     }
 
     /**
@@ -210,17 +177,38 @@ class JWT
     }
 
     /**
-     * Extract token from Authorization header
+     * Extract token from Authorization header (deprecated - use extractAccessToken instead)
      */
     public static function extractFromHeader(): ?string
     {
-        $headers = getallheaders();
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        // Try getallheaders() first (available in web/Apache context)
+        if (function_exists('getallheaders')) {
+            $headers = getallheaders();
+            $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        } else {
+            // Fall back to $_SERVER for CLI or non-standard environments
+            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        }
 
         if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
             return $matches[1];
         }
 
         return null;
+    }
+
+    /**
+     * Extract access token from HttpOnly cookies
+     * Supports both header-based and cookie-based authentication
+     */
+    public static function extractAccessToken(): ?string
+    {
+        // First, try to get token from HttpOnly cookie
+        if (isset($_COOKIE['access_token']) && !empty($_COOKIE['access_token'])) {
+            return $_COOKIE['access_token'];
+        }
+
+        // Fall back to Authorization header for backward compatibility
+        return self::extractFromHeader();
     }
 }

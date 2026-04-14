@@ -16,18 +16,30 @@ date_default_timezone_set('Asia/Manila');
 
 // Load core files
 require_once __DIR__ . '/config/cors.php';
+require_once __DIR__ . '/config/security.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/utils/Response.php';
+require_once __DIR__ . '/controllers/Controller.php';
 
 // Set CORS headers
 setCorsHeaders();
 
+// Set security headers
+setSecurityHeaders();
+
 // Get request info
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+$scriptDir = dirname($scriptName);
 
-// Remove /api prefix if present
+// Remove script name or directory from the request path
+$uri = preg_replace('#^' . preg_quote($scriptName, '#') . '#', '', $uri);
+$uri = preg_replace('#^' . preg_quote($scriptDir, '#') . '#', '', $uri);
+
+// Remove /api or /index.php prefixes if present
 $uri = preg_replace('#^/api#', '', $uri);
+$uri = preg_replace('#^/index\.php#', '', $uri);
 $uri = '/' . trim($uri, '/');
 
 // Parse URI segments

@@ -278,7 +278,10 @@ DROP TABLE IF EXISTS `orders`;
 CREATE TABLE `orders` (
   `id` CHAR(36) NOT NULL,
   `order_number` VARCHAR(50) NOT NULL,
-  `customer_id` CHAR(36) NOT NULL,
+  `customer_id` CHAR(36) NULL,
+  `customer_name` VARCHAR(255) NULL,
+  `customer_phone` VARCHAR(20) NULL,
+  `shipping_address` TEXT NULL,
   `status` ENUM('pending', 'confirmed', 'processing', 'ready', 'completed', 'cancelled') NOT NULL DEFAULT 'pending',
   `subtotal` DECIMAL(12, 2) NOT NULL,
   `discount_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
