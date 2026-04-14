@@ -25,8 +25,13 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     const fetchTransactions = async () => {
       try {
         const data = await transactionService.list()
-        if (data && Array.isArray(data)) {
-          setTransactions(data)
+        const transactionsData = Array.isArray(data)
+          ? data
+          : data?.data && Array.isArray(data.data)
+          ? data.data
+          : []
+        if (transactionsData.length > 0 || Array.isArray(data)) {
+          setTransactions(transactionsData)
         }
       } catch (error) {
         console.error('Failed to fetch transactions:', error)

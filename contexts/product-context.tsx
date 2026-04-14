@@ -29,23 +29,48 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   const fetchProducts = useCallback(async () => {
     try {
       const data = await productService.list()
-      if (data && Array.isArray(data)) {
-        setProducts(data)
+      const productsData = Array.isArray(data)
+        ? data
+        : data?.data && Array.isArray(data.data)
+        ? data.data
+        : []
+
+      if (productsData.length > 0) {
+        setProducts(productsData)
+      } else if (!Array.isArray(data) && data?.data) {
+        console.warn('Unexpected product response shape, loaded data from wrapper:', data)
+        setProducts(productsData)
+      } else {
+        setProducts([])
       }
     } catch (err) {
-      console.error('Failed to fetch products:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch products')
+      console.warn('Could not fetch products:', err)
+      setError('Failed to load products')
+      setProducts([])
     }
   }, [])
 
   const fetchCategories = useCallback(async () => {
     try {
       const data = await categoryService.list()
-      if (data && Array.isArray(data)) {
-        setCategories(data)
+      const categoriesData = Array.isArray(data)
+        ? data
+        : data?.data && Array.isArray(data.data)
+        ? data.data
+        : []
+
+      if (categoriesData.length > 0) {
+        setCategories(categoriesData)
+      } else if (!Array.isArray(data) && data?.data) {
+        console.warn('Unexpected category response shape, loaded data from wrapper:', data)
+        setCategories(categoriesData)
+      } else {
+        setCategories([])
       }
     } catch (err) {
-      console.error('Failed to fetch categories:', err)
+      console.warn('Could not fetch categories:', err)
+      setError('Failed to load categories')
+      setCategories([])
     }
   }, [])
 

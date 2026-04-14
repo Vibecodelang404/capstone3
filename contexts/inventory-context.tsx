@@ -82,11 +82,23 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     const fetchInventory = async () => {
       try {
         const data = await inventoryService.list()
-        if (data && Array.isArray(data)) {
-          setInventoryLevels(data)
+        const inventoryData = Array.isArray(data)
+          ? data
+          : data?.data && Array.isArray(data.data)
+          ? data.data
+          : []
+
+        if (inventoryData.length > 0) {
+          setInventoryLevels(inventoryData)
+        } else if (!Array.isArray(data) && data?.data) {
+          console.warn('Unexpected inventory response shape, loaded data from wrapper:', data)
+          setInventoryLevels(inventoryData)
+        } else {
+          setInventoryLevels([])
         }
       } catch (error) {
-        console.error('Failed to fetch inventory:', error)
+        console.warn('Could not fetch inventory:', error)
+        setInventoryLevels([])
       } finally {
         setIsLoading(false)
       }

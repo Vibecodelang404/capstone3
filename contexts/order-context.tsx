@@ -1,7 +1,9 @@
 'use client'
 
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react'
+import { useAuth } from '@/contexts/auth-context'
 import { orderService } from '@/lib/api-service'
+import { ordersApi } from '@/lib/api/orders'
 import type { Order, OrderStatus } from '@/lib/types'
 import { isValidPhoneNumber } from '@/lib/utils/validation'
 
@@ -9,11 +11,11 @@ interface OrderContextType {
   orders: Order[]
   addOrder: (order: Omit<Order, 'id' | 'orderNo' | 'createdAt'>) => Order | null
   updateOrderStatus: (orderId: string, status: OrderStatus) => void
-  cancelOrder: (orderId: string) => { success: boolean; error?: string }
+  cancelOrder: (orderId: string, guestData?: { order_number: string; customer_phone: string }) => Promise<{ success: boolean; error?: string }>
   getOrdersByStatus: (status: OrderStatus) => Order[]
   getPendingOrdersCount: () => number
   getOrdersForUser: (userId: string) => Order[]
-  lookupOrder: (orderNo: string, phone: string) => Order | null
+  lookupOrder: (orderNo: string, phone: string) => Promise<Order | null>
   validateOrder: (order: Omit<Order, 'id' | 'orderNo' | 'createdAt'>) => { valid: boolean; error?: string }
 }
 
@@ -22,16 +24,28 @@ const OrderContext = createContext<OrderContextType | undefined>(undefined)
 const MAX_ORDERS_PER_MINUTE = 5
 
 export function OrderProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   
-  // Fetch orders from API on mount
+  // Fetch orders from API on mount - only if user is authenticated
   useEffect(() => {
     const fetchOrders = async () => {
       try {
+        // Only fetch orders for authenticated users
+        if (!user) {
+          setIsLoading(false)
+          return
+        }
+        
         const data = await orderService.list()
-        if (data && Array.isArray(data)) {
-          setOrders(data)
+        const ordersData = Array.isArray(data)
+          ? data
+          : data?.data && Array.isArray(data.data)
+          ? data.data
+          : []
+        if (ordersData.length > 0 || Array.isArray(data)) {
+          setOrders(ordersData)
         }
       } catch (error) {
         console.error('Failed to fetch orders:', error)
@@ -40,7 +54,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       }
     }
     fetchOrders()
-  }, [])
+  }, [user])
   
   // Track recent orders using useRef to persist across renders but not HMR
   const recentOrderTimestamps = useRef<number[]>([])
@@ -133,26 +147,25 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Cancel an order — only allowed if status is 'pending'
-  const cancelOrder = useCallback((orderId: string): { success: boolean; error?: string } => {
-    const order = orders.find(o => o.id === orderId)
+  const cancelOrder = useCallback(async (orderId: string, guestData?: { order_number: string; customer_phone: string }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // Call the API to cancel the order
+      await ordersApi.cancel(orderId, guestData)
 
-    if (!order) {
-      return { success: false, error: 'Order not found.' }
-    }
+      // Update local state if the order exists (for authenticated users)
+      setOrders(prev =>
+        prev.map(o => o.id === orderId ? { ...o, status: 'cancelled' as OrderStatus } : o)
+      )
 
-    if (order.status !== 'pending') {
+      return { success: true }
+    } catch (error: any) {
+      console.error('Cancel order error:', error)
       return { 
         success: false, 
-        error: `This order cannot be cancelled because it is already "${order.status}".`
+        error: error?.message || 'Failed to cancel order. Please try again.' 
       }
     }
-
-    setOrders(prev =>
-      prev.map(o => o.id === orderId ? { ...o, status: 'cancelled' as OrderStatus } : o)
-    )
-
-    return { success: true }
-  }, [orders])
+  }, [])
 
   const getOrdersByStatus = useCallback((status: OrderStatus) => {
     return orders.filter(order => order.status === status)
@@ -169,23 +182,34 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     return orders.filter(order => order.userId === userId)
   }, [orders])
 
-  // Lookup order by order number and phone for guests
-  const lookupOrder = useCallback((orderNo: string, phone: string): Order | null => {
-    const cleanPhone = phone.replace(/[\s-]/g, '')
-    const cleanOrderNo = orderNo.trim().toUpperCase()
-    
-    const order = orders.find(o => {
-      const orderPhone = o.customerPhone.replace(/[\s-]/g, '')
-      const matchesOrderNo = o.orderNo.toUpperCase() === cleanOrderNo || 
-                             o.id.toUpperCase().includes(cleanOrderNo.replace('ORD-', ''))
-      const matchesPhone = orderPhone === cleanPhone || 
-                           orderPhone.endsWith(cleanPhone.slice(-10)) ||
-                           cleanPhone.endsWith(orderPhone.slice(-10))
-      return matchesOrderNo && matchesPhone
-    })
-    
-    return order || null
-  }, [orders])
+  // Lookup order by order number and phone for guests using the backend tracking endpoint
+  const lookupOrder = useCallback(async (orderNo: string, phone: string): Promise<Order | null> => {
+    const response = await ordersApi.track(orderNo, phone)
+    const orderData = response.data
+    if (!orderData) {
+      return null
+    }
+
+    return {
+      id: orderData.id,
+      orderNo: orderData.order_number,
+      source: 'website',
+      userId: orderData.customer_id ?? undefined,
+      customerName: orderData.customer_name ?? '',
+      customerPhone: orderData.customer_phone ?? '',
+      items: (orderData.items ?? []).map(item => ({
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: item.quantity,
+        unitPrice: item.unit_price,
+      })),
+      total: orderData.total,
+      paymentMethod: orderData.payment_method as any,
+      status: orderData.status as OrderStatus,
+      notes: orderData.delivery_notes ?? orderData.shipping_address ?? undefined,
+      createdAt: new Date(orderData.created_at),
+    }
+  }, [])
 
   return (
     <OrderContext.Provider value={{

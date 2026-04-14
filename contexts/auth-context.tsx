@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import type { User, UserRole } from '@/lib/types'
-import { authService, getAuthToken, setAuthToken } from '@/lib/api-service'
+import { authApi } from '@/lib/api'
 import { getDefaultPath } from '@/lib/utils/permissions'
 
 interface RegisterUserData {
@@ -57,17 +57,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     
     try {
-      const data = await authService.login(email, password)
+      const response = await authApi.login(email, password)
       
-      if (data && data.user) {
-        const userWithLogin = { ...data.user, lastLogin: new Date() }
+      if (response.success && response.data) {
+        const userWithLogin = { ...response.data.user, lastLogin: new Date() }
         setUser(userWithLogin)
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userWithLogin))
         
         setIsLoading(false)
         
         // Redirect to role-specific dashboard
-        const redirectPath = getDefaultPath(data.user.role)
+        const redirectPath = getDefaultPath(response.data.user.role)
         router.push(redirectPath)
         
         return { success: true }
@@ -85,10 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     
     try {
-      const result = await authService.register(data.name, data.email, data.password)
+      const result = await authApi.register(data)
       
-      if (result && result.user) {
-        const userWithLogin = { ...result.user, lastLogin: new Date() }
+      if (result.success && result.data) {
+        const userWithLogin = { ...result.data.user, lastLogin: new Date() }
         setUser(userWithLogin as User)
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userWithLogin))
         setIsLoading(false)
@@ -111,8 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentRole = user?.role
     setUser(null)
     localStorage.removeItem(AUTH_STORAGE_KEY)
-    setAuthToken(null) // Clear API token
-    authService.logout() // Call API logout
+    authApi.logout() // Call API logout (clears HttpOnly cookies)
     // Redirect staff to staff login, customers to customer login
     if (currentRole && currentRole !== 'customer') {
       router.push('/admin/login')
