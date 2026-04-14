@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import type { PurchaseUnitType } from "@/lib/types"
+import type { PurchaseUnitType, Product } from "@/lib/types"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -28,11 +28,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { mockProducts } from "@/lib/mock-data/products"
-import { mockCategories } from "@/lib/mock-data/categories"
 import { formatCurrency } from "@/lib/utils/currency"
 import { useCart } from "@/contexts/cart-context"
 import { useInventory } from "@/contexts/inventory-context"
+import { useProducts } from "@/contexts/product-context"
 import { Search, ShoppingCart, Package, SlidersHorizontal, Grid3X3, LayoutList, Minus, Plus, Check, X, BoxesIcon } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -44,18 +43,16 @@ export default function ShopPage() {
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [sortBy, setSortBy] = useState("name")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
-  const [selectedProduct, setSelectedProduct] = useState<typeof mockProducts[0] | null>(null)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [quantity, setQuantity] = useState(1)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [selectedUnit, setSelectedUnit] = useState<PurchaseUnitType>("pack")
   const { addItem, items } = useCart()
   const { getInventory } = useInventory()
+  const { products, categories, isLoading } = useProducts()
 
-
-
-  const filteredProducts = mockProducts
+  const filteredProducts = products
     .filter((product) => {
-      if (!product.isActive) return false
       const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesCategory = selectedCategory === "all" || product.categoryId === selectedCategory
       return matchesSearch && matchesCategory
@@ -68,11 +65,11 @@ export default function ShopPage() {
     })
 
   const handleAddToCart = (
-    product: typeof mockProducts[0], 
+    product: Product, 
     qty: number = 1, 
     unitType: PurchaseUnitType = "pack"
   ) => {
-    const variant = product.variants[0]
+    const variant = product.variants?.[0]
     const inventory = getInventory(product.id)
     
     // Determine price and unit label based on unit type
@@ -117,7 +114,7 @@ export default function ShopPage() {
     return items.some(item => item.productId === productId)
   }
 
-  const openProductDialog = (product: typeof mockProducts[0]) => {
+  const openProductDialog = (product: Product) => {
     const inventory = getInventory(product.id)
     const packStock = inventory?.retailQty || 0
     const boxStock = inventory?.wholesaleQty || 0
@@ -142,7 +139,7 @@ export default function ShopPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {mockCategories.map((category) => (
+            {categories.map((category) => (
               <SelectItem key={category.id} value={category.id}>
                 {category.name}
               </SelectItem>
@@ -244,7 +241,7 @@ export default function ShopPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
-                  {mockCategories.map((category) => (
+                  {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
                     </SelectItem>
@@ -321,7 +318,7 @@ export default function ShopPage() {
         {viewMode === "grid" ? (
           <div className="grid gap-4 sm:gap-6 grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredProducts.map((product) => {
-              const variant = product.variants[0]
+              const variant = product.variants?.[0]
               const inventory = getInventory(product.id)
               const pcsPerPack = inventory?.pcsPerPack || 6
               const packPrice = variant 
@@ -330,7 +327,7 @@ export default function ShopPage() {
               const packStock = inventory?.retailQty || 0
               const boxStock = inventory?.wholesaleQty || 0
               const inStock = packStock > 0 || boxStock > 0
-              const category = mockCategories.find(c => c.id === product.categoryId)
+              const category = categories.find(c => c.id === product.categoryId)
               const inCart = isInCart(product.id)
               const packLabel = inventory?.retailUnit || "pack"
 
@@ -408,7 +405,7 @@ export default function ShopPage() {
         ) : (
           <div className="space-y-3">
             {filteredProducts.map((product) => {
-              const variant = product.variants[0]
+              const variant = product.variants?.[0]
               const inventory = getInventory(product.id)
               const pcsPerPack = inventory?.pcsPerPack || 6
               const packPrice = variant 
@@ -417,7 +414,7 @@ export default function ShopPage() {
               const packStock = inventory?.retailQty || 0
               const boxStock = inventory?.wholesaleQty || 0
               const inStock = packStock > 0 || boxStock > 0
-              const category = mockCategories.find(c => c.id === product.categoryId)
+              const category = categories.find(c => c.id === product.categoryId)
               const inCart = isInCart(product.id)
               const packLabel = inventory?.retailUnit || "pack"
 
@@ -495,8 +492,19 @@ export default function ShopPage() {
           </div>
         )}
 
+        {/* Loading State */}
+        {isLoading && (
+          <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center">
+            <div className="h-20 w-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-6 animate-pulse">
+              <Package className="h-10 w-10 text-muted-foreground/30" />
+            </div>
+            <h3 className="text-lg font-semibold">Loading products...</h3>
+            <p className="text-muted-foreground mt-1">Please wait while we fetch your products</p>
+          </div>
+        )}
+
         {/* Empty State */}
-        {filteredProducts.length === 0 && (
+        {!isLoading && filteredProducts.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center">
             <div className="h-20 w-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-6">
               <Package className="h-10 w-10 text-muted-foreground/50" />
@@ -524,9 +532,9 @@ export default function ShopPage() {
       <Dialog open={!!selectedProduct} onOpenChange={() => { setSelectedProduct(null); setQuantity(1); setSelectedUnit("pack") }}>
         <DialogContent className="sm:max-w-[480px] p-0 gap-0 rounded-2xl overflow-hidden max-h-[90vh] flex flex-col">
           {selectedProduct && (() => {
-            const variant = selectedProduct.variants[0]
+            const variant = selectedProduct.variants?.[0]
             const inventory = getInventory(selectedProduct.id)
-            const category = mockCategories.find(c => c.id === selectedProduct.categoryId)
+            const category = categories.find(c => c.id === selectedProduct.categoryId)
             
             // Calculate prices for each unit type
             const packPrice = variant ? selectedProduct.retailPrice + variant.priceAdjustment : selectedProduct.retailPrice

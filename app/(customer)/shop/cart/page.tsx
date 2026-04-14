@@ -61,7 +61,7 @@ export default function CartPage() {
           <div className="lg:col-span-2 space-y-4">
             {items.map((item, index) => (
               <Card 
-                key={`${item.productId}-${item.variantId}`}
+                key={`${item.productId}-${item.variantId}-${item.unitType}`}
                 className="overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm"
               >
                 <CardContent className="p-4 sm:p-6">

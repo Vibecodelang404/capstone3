@@ -1,7 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,10 +14,10 @@ import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { useCart } from "@/contexts/cart-context"
 import { useAuth } from "@/contexts/auth-context"
-import { useOrders } from "@/contexts/order-context"
 import { useInventory } from "@/contexts/inventory-context"
+import { orderService } from "@/lib/api-service"
 import { formatCurrency } from "@/lib/utils/currency"
-import { isValidPhoneNumber, isValidName } from "@/lib/utils/validation"
+import { isValidPhoneNumber } from "@/lib/utils/validation"
 import type { InventoryTier } from "@/lib/types"
 import { ArrowLeft, CreditCard, Banknote, Smartphone, ShoppingBag, CheckCircle, Loader2, Package, ArrowRight, Sparkles, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
@@ -49,22 +52,58 @@ const paymentMethods = [
   },
 ]
 
+const checkoutSchema = z.object({
+  customerName: z.string().min(2, "Please enter your full name"),
+  customerPhone: z.string().min(10, "Please enter a valid phone number"),
+  shippingAddress: z.string().min(5, "Shipping address is required"),
+  notes: z.string().max(500).optional(),
+  paymentMethod: z.enum(["cash", "gcash", "maya"]),
+})
+
+type CheckoutFormValues = z.infer<typeof checkoutSchema>
+
 export default function CheckoutPage() {
   const { user } = useAuth()
   const { items, total, clearCart } = useCart()
-  const { addOrder, validateOrder } = useOrders()
-  const { adjustStock, getInventory } = useInventory()
+  const { getInventory } = useInventory()
   const [isProcessing, setIsProcessing] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
   const [orderNo, setOrderNo] = useState<string | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash")
   const [formError, setFormError] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
-    name: user?.name || "",
-    phone: "",
-    email: user?.email || "",
-    notes: "",
+
+  const defaultPhone = (user as any)?.phone ?? ""
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<CheckoutFormValues>({
+    resolver: zodResolver(checkoutSchema),
+    defaultValues: {
+      customerName: user?.name ?? "",
+      customerPhone: defaultPhone,
+      shippingAddress: "",
+      notes: "",
+      paymentMethod: "cash",
+    },
   })
+
+  useEffect(() => {
+    if (user) {
+      reset({
+        customerName: user.name ?? "",
+        customerPhone: defaultPhone,
+        shippingAddress: watch('shippingAddress') || "",
+        notes: watch('notes') || "",
+        paymentMethod: (watch('paymentMethod') as PaymentMethod) || "cash",
+      })
+    }
+  }, [user, defaultPhone, reset, watch])
+
+  const paymentMethod = watch('paymentMethod') as PaymentMethod
 
   if (items.length === 0 && !isComplete) {
     return (
@@ -128,28 +167,16 @@ export default function CheckoutPage() {
     )
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const onSubmit = async (values: CheckoutFormValues) => {
     setFormError(null)
     setIsProcessing(true)
-    
-    // Validate name using shared utility
-    const nameValidation = isValidName(formData.name)
-    if (!nameValidation.valid) {
-      setFormError(nameValidation.error || "Invalid name")
-      setIsProcessing(false)
-      return
-    }
-    
-    // Validate phone using shared utility
-    if (!isValidPhoneNumber(formData.phone)) {
-      setFormError("Please enter a valid Philippine phone number (e.g., 09171234567)")
+
+    if (items.length === 0) {
+      setFormError('Your cart is empty')
       setIsProcessing(false)
       return
     }
 
-    // Verify product availability and prices before processing payment
-    // This prevents selling items that no longer exist or price mismatches
     for (const item of items) {
       const inventory = getInventory(item.productId)
       if (!inventory) {
@@ -158,11 +185,12 @@ export default function CheckoutPage() {
         return
       }
 
-      // Check that the tier has enough stock
-      const tier = item.unitType === 'box' ? inventory.wholesaleQty 
-                 : item.unitType === 'pack' ? inventory.retailQty 
-                 : inventory.shelfQty
-      
+      const tier = item.unitType === 'box'
+        ? inventory.wholesaleQty
+        : item.unitType === 'pack'
+        ? inventory.retailQty
+        : inventory.shelfQty
+
       if (tier < item.quantity) {
         setFormError(`Insufficient stock for "${item.productName}". Only ${tier} available.`)
         setIsProcessing(false)
@@ -170,13 +198,13 @@ export default function CheckoutPage() {
       }
     }
 
-    // Prepare order data
-    const orderData = {
+    const orderPayload = {
       source: 'website' as const,
-      userId: user?.id, // Will be undefined for guests
-      customerName: formData.name,
-      customerPhone: formData.phone,
-      items: items.map(item => ({
+      userId: user?.id,
+      customerName: values.customerName,
+      customerPhone: values.customerPhone,
+      shippingAddress: values.shippingAddress,
+      items: items.map((item) => ({
         productId: item.productId,
         variantId: item.variantId,
         productName: item.productName,
@@ -185,95 +213,27 @@ export default function CheckoutPage() {
         unitPrice: item.unitPrice,
       })),
       total,
-      paymentMethod,
-      status: 'pending' as const,
-      notes: formData.notes || undefined,
+      paymentMethod: paymentMethod,
+      notes: values.notes?.trim() || undefined,
     }
 
-    // Validate order before submitting
-    const validation = validateOrder(orderData)
-    if (!validation.valid) {
-      setFormError(validation.error || "Invalid order data")
-      setIsProcessing(false)
-      return
-    }
-    
-    // Simulate order processing
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    // Deduct inventory FIRST before creating order
-    const customerName = user?.name || formData.name
-    const deductedItems: Array<{productId: string; tier: InventoryTier; quantity: number}> = []
-    let inventoryError = false
-    let errorMessage = ""
-    
-    // Try to deduct all items
-    for (const item of items) {
-      // Determine which tier to deduct from based on unit type
-      // Default to 'retail' for standard sales (packs), 'wholesale' for boxes
-      const tier: InventoryTier = item.unitType === 'box' ? 'wholesale' 
-                                : item.unitType === 'piece' ? 'shelf'
-                                : 'retail'
-      
-      const result = adjustStock(
-        item.productId,
-        tier,
-        -item.quantity,
-        'Sale',
-        `Customer order - Sold ${item.quantity} ${item.unitLabel || 'unit(s)'}`,
-        customerName
+    try {
+      const createdOrder = await orderService.create(orderPayload)
+      clearCart()
+      // Extract order_number from the response data
+      const orderNumber = createdOrder.data?.order_number ?? createdOrder.orderNo ?? createdOrder.id ?? null
+      setOrderNo(orderNumber)
+      setIsComplete(true)
+      toast.success('Order placed successfully!')
+    } catch (error) {
+      setFormError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to submit order. Please try again.'
       )
-      
-      if (!result.success) {
-        inventoryError = true
-        errorMessage = result.error || "Failed to update inventory"
-        break
-      }
-      
-      deductedItems.push({ productId: item.productId, tier, quantity: item.quantity })
-    }
-
-    // If any inventory deduction failed, rollback previous deductions
-    if (inventoryError) {
-      for (const deducted of deductedItems) {
-        adjustStock(
-          deducted.productId,
-          deducted.tier,
-          deducted.quantity, // Add back the quantity
-          'Rollback',
-          `Rollback for failed order`,
-          customerName
-        )
-      }
+    } finally {
       setIsProcessing(false)
-      setFormError(`Inventory error: ${errorMessage}. Please try again.`)
-      return
     }
-    
-    // Create the order AFTER inventory is deducted
-    const newOrder = addOrder(orderData)
-    
-    if (!newOrder) {
-      // If order creation failed, rollback inventory changes
-      for (const deducted of deductedItems) {
-        adjustStock(
-          deducted.productId,
-          deducted.tier,
-          deducted.quantity,
-          'Rollback',
-          `Rollback for failed order creation`,
-          customerName
-        )
-      }
-      setIsProcessing(false)
-      setFormError("Failed to place order. Please try again.")
-      return
-    }
-    
-    clearCart()
-    setOrderNo(newOrder.orderNo)
-    setIsComplete(true)
-    toast.success("Order placed successfully!")
   }
 
   return (
@@ -301,7 +261,7 @@ export default function CheckoutPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit(onSubmit)}>
           <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
@@ -316,46 +276,50 @@ export default function CheckoutPage() {
                 <CardContent className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="name" className="text-sm font-medium">
+                      <Label htmlFor="customerName" className="text-sm font-medium">
                         Full Name <span className="text-destructive">*</span>
                       </Label>
                       <Input
-                        id="name"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        id="customerName"
                         placeholder="Juan Dela Cruz"
                         className="h-11 rounded-xl"
-                        required
+                        {...register('customerName')}
                       />
+                      {errors.customerName && (
+                        <p className="text-xs text-destructive">{errors.customerName.message}</p>
+                      )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="phone" className="text-sm font-medium">
+                      <Label htmlFor="customerPhone" className="text-sm font-medium">
                         Phone Number <span className="text-destructive">*</span>
                       </Label>
                       <Input
-                        id="phone"
+                        id="customerPhone"
                         type="tel"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         placeholder="09171234567"
                         className="h-11 rounded-xl"
-                        required
+                        {...register('customerPhone')}
                       />
+                      {errors.customerPhone && (
+                        <p className="text-xs text-destructive">{errors.customerPhone.message}</p>
+                      )}
                       <p className="text-xs text-muted-foreground">Format: 09XXXXXXXXX or +639XXXXXXXXX</p>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="text-sm font-medium">
-                      Email <span className="text-muted-foreground text-xs">(Optional)</span>
+                    <Label htmlFor="shippingAddress" className="text-sm font-medium">
+                      Shipping Address <span className="text-destructive">*</span>
                     </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      placeholder="juan@example.com"
-                      className="h-11 rounded-xl"
+                    <Textarea
+                      id="shippingAddress"
+                      placeholder="123 Example St, Barangay, City"
+                      rows={3}
+                      className="rounded-xl resize-none"
+                      {...register('shippingAddress')}
                     />
+                    {errors.shippingAddress && (
+                      <p className="text-xs text-destructive">{errors.shippingAddress.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="notes" className="text-sm font-medium">
@@ -363,11 +327,10 @@ export default function CheckoutPage() {
                     </Label>
                     <Textarea
                       id="notes"
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       placeholder="Any special instructions for your order..."
                       rows={3}
                       className="rounded-xl resize-none"
+                      {...register('notes')}
                     />
                   </div>
                 </CardContent>
@@ -384,7 +347,7 @@ export default function CheckoutPage() {
                 <CardContent>
                   <RadioGroup
                     value={paymentMethod}
-                    onValueChange={(value) => setPaymentMethod(value as PaymentMethod)}
+                    onValueChange={(value) => setValue('paymentMethod', value as PaymentMethod)}
                     className="grid gap-3 sm:grid-cols-3"
                   >
                     {paymentMethods.map((method) => {
@@ -433,7 +396,7 @@ export default function CheckoutPage() {
                   <div className="space-y-4">
                     {items.map((item, index) => (
                       <div 
-                        key={`${item.productId}-${item.variantId}`} 
+                        key={`${item.productId}-${item.variantId}-${item.unitType}`} 
                         className={cn(
                           "flex items-center gap-4",
                           index !== items.length - 1 && "pb-4 border-b border-border/50"

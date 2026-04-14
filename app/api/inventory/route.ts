@@ -1,44 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Mock inventory data
-const mockInventory = [
-  {
-    id: '1',
-    product_id: '1',
-    quantity: 50,
-    reorder_level: 10,
-    reorder_quantity: 25,
-    last_updated: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    product_id: '2',
-    quantity: 5,
-    reorder_level: 20,
-    reorder_quantity: 50,
-    last_updated: new Date().toISOString(),
-  },
-];
-
 export async function GET(request: NextRequest) {
-  return NextResponse.json(mockInventory);
+  try {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost/capstone3-main/api/index.php';
+    
+    const response = await fetch(`${backendUrl}/inventory`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Failed to fetch inventory' },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('Inventory proxy error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch inventory' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost/capstone3-main/api/index.php';
     const body = await request.json();
 
-    const newItem = {
-      id: Date.now().toString(),
-      last_updated: new Date().toISOString(),
-      ...body,
-    };
+    const response = await fetch(`${backendUrl}/inventory`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
 
-    return NextResponse.json(newItem, { status: 201 });
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Failed to create inventory' },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
+    console.error('Inventory POST error:', error);
     return NextResponse.json(
-      { error: 'Failed to create inventory item' },
-      { status: 400 }
+      { error: 'Failed to create inventory' },
+      { status: 500 }
     );
   }
 }

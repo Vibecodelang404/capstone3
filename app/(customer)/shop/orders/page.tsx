@@ -23,7 +23,7 @@ import { format } from "date-fns"
 import { Package, ChevronRight, Clock, CheckCircle2, XCircle, Truck, ShoppingBag, Search, AlertCircle, Ban } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { Order } from "@/lib/types"
+import type { Order } from "@/lib/api/orders"
 
 const statusConfig: Record<string, { 
   label: string
@@ -88,9 +88,9 @@ function CancelConfirmDialog({
           </div>
           <DialogDescription className="text-sm leading-relaxed">
             Are you sure you want to cancel order{" "}
-            <span className="font-mono font-semibold text-foreground">
-              {order.orderNo || order.id.slice(0, 8).toUpperCase()}
-            </span>
+                <span className="font-mono font-semibold text-foreground">
+                  {order.order_number || order.id.slice(0, 8).toUpperCase()}
+                </span>
             ? This action cannot be undone.
           </DialogDescription>
         </DialogHeader>
@@ -169,7 +169,7 @@ function OrderCard({ order, onCancel }: { order: Order; onCancel: (order: Order)
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-sm font-medium">
-                  {order.orderNo || order.id.slice(0, 8).toUpperCase()}
+                  {order.order_number || order.id.slice(0, 8).toUpperCase()}
                 </span>
                 <Badge
                   variant="outline"
@@ -179,7 +179,14 @@ function OrderCard({ order, onCancel }: { order: Order; onCancel: (order: Order)
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {format(new Date(order.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                {(() => {
+                  try {
+                    const date = new Date(order.created_at);
+                    return isNaN(date.getTime()) ? 'Date not available' : format(date, "MMM d, yyyy 'at' h:mm a");
+                  } catch {
+                    return 'Date not available';
+                  }
+                })()}
               </p>
             </div>
           </div>
@@ -278,7 +285,7 @@ function GuestOrderLookup() {
   const [error, setError] = useState<string | null>(null)
   const [isSearching, setIsSearching] = useState(false)
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
 
@@ -289,32 +296,39 @@ function GuestOrderLookup() {
 
     setIsSearching(true)
 
-    // Small delay for UX feedback
-    setTimeout(() => {
-      const order = lookupOrder(orderNo, phone)
+    try {
+      const order = await lookupOrder(orderNo, phone)
       setFoundOrder(order)
-      setIsSearching(false)
 
       if (order) {
         setDialogOpen(true)
       } else {
         setError("No order found with that order number and phone number. Please check your details and try again.")
       }
-    }, 300)
+    } catch (error) {
+      setFoundOrder(null)
+      const message = error instanceof Error ? error.message : "Unable to fetch order. Please try again."
+      setError(message)
+    } finally {
+      setIsSearching(false)
+    }
   }
 
-  const handleGuestCancelConfirm = () => {
+  const handleGuestCancelConfirm = async () => {
     if (!foundOrder) return
     setIsCancelling(true)
 
-    setTimeout(() => {
-      const result = cancelOrder(foundOrder.id)
+    setTimeout(async () => {
+      const result = await cancelOrder(foundOrder.id, {
+        order_number: foundOrder.order_number || '',
+        customer_phone: foundOrder.customer_phone || ''
+      })
       setIsCancelling(false)
       setCancelDialogOpen(false)
 
       if (result.success) {
         // Refresh the found order so the status updates in the dialog
-        const updated = lookupOrder(orderNo, phone)
+        const updated = await lookupOrder(orderNo, phone)
         setFoundOrder(updated)
         toast.success("Order cancelled successfully.")
       } else {
@@ -427,10 +441,17 @@ function GuestOrderLookup() {
                   </div>
                   <div>
                     <DialogTitle className="text-xl">
-                      Order {foundOrder.orderNo || foundOrder.id.slice(0, 8).toUpperCase()}
+                      Order {foundOrder.order_number || foundOrder.id.slice(0, 8).toUpperCase()}
                     </DialogTitle>
                     <DialogDescription>
-                      {format(new Date(foundOrder.createdAt), "MMMM d, yyyy 'at' h:mm a")}
+                      {(() => {
+                        try {
+                          const date = new Date(foundOrder.created_at);
+                          return isNaN(date.getTime()) ? 'Date not available' : format(date, "MMMM d, yyyy 'at' h:mm a");
+                        } catch {
+                          return 'Date not available';
+                        }
+                      })()}
                     </DialogDescription>
                   </div>
                 </div>
@@ -550,13 +571,13 @@ function UserOrders() {
 
   const userOrders = user ? getOrdersForUser(user.id) : []
 
-  const handleCancelConfirm = () => {
+  const handleCancelConfirm = async () => {
     if (!orderToCancel) return
     setIsCancelling(true)
 
     // Small delay for UX feedback
-    setTimeout(() => {
-      const result = cancelOrder(orderToCancel.id)
+    setTimeout(async () => {
+      const result = await cancelOrder(orderToCancel.id)
       setIsCancelling(false)
       setOrderToCancel(null)
 
