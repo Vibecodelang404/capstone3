@@ -5,6 +5,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../utils/Transformer.php';
+
 class Category extends Model
 {
     protected static string $table = 'categories';
@@ -17,7 +19,8 @@ class Category extends Model
         $sql = "SELECT * FROM categories WHERE is_active = 1 ORDER BY display_order ASC, name ASC";
         $stmt = $this->db->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return Transformer::toApiFormatArray($results);
     }
 
     /**
@@ -58,12 +61,14 @@ class Category extends Model
         $category = $this->find($id);
         if (!$category) return null;
 
+        $category = Transformer::toApiFormat($category);
+
         $count = $this->queryOne(
             "SELECT COUNT(*) as count FROM products WHERE category_id = ? AND is_active = 1 AND deleted_at IS NULL",
             [$id]
         );
 
-        $category['product_count'] = (int)($count['count'] ?? 0);
+        $category['productCount'] = (int)($count['count'] ?? 0);
         return $category;
     }
 }

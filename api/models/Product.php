@@ -5,6 +5,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../utils/Transformer.php';
+
 class Product extends Model
 {
     protected static string $table = 'products';
@@ -30,7 +32,8 @@ class Product extends Model
         $params = [];
         if ($category ?? null) $params[] = $category;
         $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return Transformer::toApiFormatArray($results);
     }
 
     /**
@@ -79,13 +82,18 @@ class Product extends Model
         $product = $this->find($id);
         if (!$product) return null;
 
+        // Transform product to API format
+        $product = Transformer::toApiFormat($product);
+
         // Get variants
         $variantModel = new ProductVariant();
-        $product['variants'] = $variantModel->findBy(['product_id' => $id]);
+        $variants = $variantModel->findBy(['product_id' => $id]);
+        $product['variants'] = Transformer::toApiFormatArray($variants);
 
         // Get inventory
         $inventoryModel = new Inventory();
-        $product['inventory'] = $inventoryModel->findBy(['product_id' => $id])[0] ?? null;
+        $inventoryRecords = $inventoryModel->findBy(['product_id' => $id]);
+        $product['inventory'] = $inventoryRecords ? Transformer::toApiFormat($inventoryRecords[0]) : null;
 
         return $product;
     }
@@ -104,6 +112,7 @@ class Product extends Model
         $search = "%{$query}%";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$search, $search, $search]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return Transformer::toApiFormatArray($results);
     }
 }

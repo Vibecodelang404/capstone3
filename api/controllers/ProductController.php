@@ -6,6 +6,12 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Controller.php';
+require_once __DIR__ . '/../models/Model.php';
+require_once __DIR__ . '/../models/Product.php';
+require_once __DIR__ . '/../models/ProductVariant.php';
+require_once __DIR__ . '/../models/Inventory.php';
+
 class ProductController extends Controller
 {
     private Product $model;
@@ -47,7 +53,7 @@ class ProductController extends Controller
 
         // Get single product
         if ($id) {
-            $this->requireRole(['admin', 'manager', 'stockman', 'cashier']);
+            // Public endpoint for guests, no authentication required
             $product = $this->model->getWithDetails($id);
 
             if (!$product) {
@@ -59,7 +65,7 @@ class ProductController extends Controller
         }
 
         // Get all products
-        $this->requireRole(['admin', 'manager', 'stockman', 'cashier', 'customer']);
+        // Public endpoint for guests, no authentication required
         
         $options = [];
         if ($category = $this->getQuery('category')) {

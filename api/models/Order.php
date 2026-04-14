@@ -10,6 +10,22 @@ class Order extends Model
     protected static string $table = 'orders';
 
     /**
+     * Create a new order record, generating a readable order number if missing.
+     */
+    public function create(array $data): array
+    {
+        if (empty($data['order_number'])) {
+            $data['order_number'] = $this->generateNumber();
+        }
+
+        if (empty($data['customer_phone']) && !empty($data['contact_phone'])) {
+            $data['customer_phone'] = $data['contact_phone'];
+        }
+
+        return parent::create($data);
+    }
+
+    /**
      * Find by order number
      */
     public function findByOrderNumber(string $orderNumber): ?array
@@ -17,6 +33,14 @@ class Order extends Model
         return $this->queryOne(
             "SELECT * FROM orders WHERE order_number = ?",
             [$orderNumber]
+        );
+    }
+
+    public function findByOrderNumberAndPhone(string $orderNumber, string $customerPhone): ?array
+    {
+        return $this->queryOne(
+            "SELECT * FROM orders WHERE order_number = ? AND customer_phone = ?",
+            [$orderNumber, $customerPhone]
         );
     }
 
@@ -131,15 +155,10 @@ class Order extends Model
     public function generateNumber(): string
     {
         $prefix = 'ORD';
-        $date = date('Ymd');
-        
-        // Get today's order count
-        $result = $this->queryOne(
-            "SELECT COUNT(*) as count FROM orders WHERE DATE(created_at) = CURDATE()"
-        );
-        $count = (int)($result['count'] ?? 0) + 1;
-        
-        return sprintf('%s-%s-%04d', $prefix, $date, $count);
+        $timestamp = date('YmdHis');
+        $random = strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+
+        return sprintf('%s-%s-%s', $prefix, $timestamp, $random);
     }
 
     /**
@@ -185,7 +204,9 @@ class Order extends Model
         $total = (int)$stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
         // Get items
-        $sql = "SELECT o.*, u.first_name, u.last_name, u.email as customer_email
+        $sql = "SELECT o.*, 
+                COALESCE(CONCAT(u.first_name, ' ', u.last_name), o.customer_name) as customer_name,
+                u.email as customer_email
                 FROM orders o 
                 LEFT JOIN users u ON o.customer_id = u.id 
                 {$where} 
@@ -195,9 +216,8 @@ class Order extends Model
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Add customer name
+        // Remove raw user name columns, keep resolved customer_name
         foreach ($items as &$item) {
-            $item['customer_name'] = trim(($item['first_name'] ?? '') . ' ' . ($item['last_name'] ?? ''));
             unset($item['first_name'], $item['last_name']);
         }
 

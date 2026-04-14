@@ -18,10 +18,21 @@ abstract class Controller
      */
     protected function getRequestData(): array
     {
-        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
 
         if (str_contains($contentType, 'application/json')) {
             return json_decode(file_get_contents('php://input'), true) ?? [];
+        }
+
+        // For PUT requests, always try JSON parsing since orders API uses JSON
+        if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+            $input = file_get_contents('php://input');
+            if (!empty($input)) {
+                $json = json_decode($input, true);
+                if ($json !== null) {
+                    return $json;
+                }
+            }
         }
 
         return $_POST ?? [];

@@ -67,9 +67,10 @@ class AuthController extends Controller
         $accessToken = $this->generateAccessToken($user);
         $refreshToken = $this->generateRefreshToken($user['id']);
 
+        // Set HttpOnly cookies
+        $this->setAuthCookies($accessToken, $refreshToken);
+
         Response::success([
-            'access_token' => $accessToken,
-            'refresh_token' => $refreshToken,
             'user' => $this->sanitizeUser($user),
             'expires_in' => 900, // 15 minutes
         ], 'Login successful');
@@ -116,9 +117,10 @@ class AuthController extends Controller
         $accessToken = $this->generateAccessToken($user);
         $refreshToken = $this->generateRefreshToken($user['id']);
 
+        // Set HttpOnly cookies
+        $this->setAuthCookies($accessToken, $refreshToken);
+
         Response::success([
-            'access_token' => $accessToken,
-            'refresh_token' => $refreshToken,
             'user' => $this->sanitizeUser($user),
             'expires_in' => 900,
         ], 'Registration successful', 201);
@@ -134,13 +136,13 @@ class AuthController extends Controller
             Response::methodNotAllowed('POST');
         }
 
-        $data = $this->getRequestData();
-
-        if (!$data['refresh_token'] ?? null) {
+        // Get refresh token from HttpOnly cookie
+        $refreshToken = $_COOKIE['refresh_token'] ?? null;
+        if (!$refreshToken) {
             Response::badRequest('Refresh token required');
         }
 
-        $token = $this->tokenModel->validateToken($data['refresh_token']);
+        $token = $this->tokenModel->validateToken($refreshToken);
         if (!$token) {
             Response::unauthorized('Invalid or expired refresh token');
         }
@@ -152,8 +154,22 @@ class AuthController extends Controller
 
         $accessToken = $this->generateAccessToken($user);
 
+        // Set the new access token cookie
+        $secure = $_SERVER['HTTPS'] === 'on' || $_SERVER['HTTPS'] === '1';
+        setcookie(
+            'access_token',
+            $accessToken,
+            [
+                'expires' => time() + (15 * 60),
+                'path' => '/',
+                'domain' => $_SERVER['HTTP_HOST'],
+                'secure' => $secure,
+                'httponly' => true,
+                'samesite' => 'Strict',
+            ]
+        );
+
         Response::success([
-            'access_token' => $accessToken,
             'expires_in' => 900,
         ], 'Token refreshed');
     }
@@ -174,6 +190,9 @@ class AuthController extends Controller
         if ($data['refresh_token'] ?? null) {
             $this->tokenModel->revokeToken($data['refresh_token']);
         }
+
+        // Clear HttpOnly cookies
+        $this->clearAuthCookies();
 
         Response::success([], 'Logout successful');
     }
@@ -217,6 +236,78 @@ class AuthController extends Controller
     {
         unset($user['password_hash']);
         return $user;
+    }
+
+    /**
+     * Set HttpOnly authentication cookies
+     */
+    private function setAuthCookies(string $accessToken, string $refreshToken): void
+    {
+        $secure = $_SERVER['HTTPS'] === 'on' || $_SERVER['HTTPS'] === '1';
+        $httpOnly = true;
+        $sameSite = 'Strict';
+
+        // Set access token cookie (15 minutes)
+        setcookie(
+            'access_token',
+            $accessToken,
+            [
+                'expires' => time() + (15 * 60),
+                'path' => '/',
+                'domain' => $_SERVER['HTTP_HOST'],
+                'secure' => $secure,
+                'httponly' => $httpOnly,
+                'samesite' => $sameSite,
+            ]
+        );
+
+        // Set refresh token cookie (7 days)
+        setcookie(
+            'refresh_token',
+            $refreshToken,
+            [
+                'expires' => time() + (7 * 24 * 60 * 60),
+                'path' => '/',
+                'domain' => $_SERVER['HTTP_HOST'],
+                'secure' => $secure,
+                'httponly' => $httpOnly,
+                'samesite' => $sameSite,
+            ]
+        );
+    }
+
+    /**
+     * Clear authentication cookies
+     */
+    private function clearAuthCookies(): void
+    {
+        $secure = $_SERVER['HTTPS'] === 'on' || $_SERVER['HTTPS'] === '1';
+        
+        setcookie(
+            'access_token',
+            '',
+            [
+                'expires' => time() - 3600,
+                'path' => '/',
+                'domain' => $_SERVER['HTTP_HOST'],
+                'secure' => $secure,
+                'httponly' => true,
+                'samesite' => 'Strict',
+            ]
+        );
+
+        setcookie(
+            'refresh_token',
+            '',
+            [
+                'expires' => time() - 3600,
+                'path' => '/',
+                'domain' => $_SERVER['HTTP_HOST'],
+                'secure' => $secure,
+                'httponly' => true,
+                'samesite' => 'Strict',
+            ]
+        );
     }
 }
 

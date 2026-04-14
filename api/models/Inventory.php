@@ -5,6 +5,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../utils/Transformer.php';
+
 class Inventory extends Model
 {
     protected static string $table = 'inventory_levels';
@@ -14,10 +16,11 @@ class Inventory extends Model
      */
     public function findByProduct(string $productId): ?array
     {
-        return $this->queryOne(
+        $result = $this->queryOne(
             "SELECT * FROM inventory_levels WHERE product_id = ?",
             [$productId]
         );
+        return $result ? Transformer::toApiFormat($result) : null;
     }
 
     /**
@@ -33,7 +36,8 @@ class Inventory extends Model
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return Transformer::toApiFormatArray($results);
     }
 
     /**
@@ -105,7 +109,8 @@ class Inventory extends Model
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return Transformer::toApiFormatArray($results);
     }
 
     /**

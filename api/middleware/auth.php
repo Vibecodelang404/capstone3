@@ -18,7 +18,7 @@ class AuthMiddleware
      */
     public static function authenticate(): bool
     {
-        $token = JWT::extractFromHeader();
+        $token = JWT::extractAccessToken();
 
         if (!$token) {
             Response::unauthorized('No authentication token provided');
@@ -114,7 +114,7 @@ class AuthMiddleware
      */
     public static function optionalAuth(): void
     {
-        $token = JWT::extractFromHeader();
+        $token = JWT::extractAccessToken();
 
         if ($token) {
             $payload = JWT::decode($token);

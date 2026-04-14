@@ -8,16 +8,17 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../utils/Response.php';
 
-class Validator
-{
-    private array $errors = [];
-    private array $data = [];
-    private array $validated = [];
-
-    public function __construct(array $data)
+if (!class_exists('Validator')) {
+    class Validator
     {
-        $this->data = $data;
-    }
+        private array $errors = [];
+        private array $data = [];
+        private array $validated = [];
+
+        public function __construct(array $data)
+        {
+            $this->data = $data;
+        }
 
     /**
      * Create validator from JSON request body
@@ -361,4 +362,42 @@ class Validator
 
         return $this->getData();
     }
+}
+}
+
+/**
+ * Helper function to validate request data with rule-based validation
+ * Supports rules like 'required', 'required|array', 'required|string', etc.
+ */
+function validateRequest(array $data, array $rules): array
+{
+    $errors = [];
+
+    foreach ($rules as $field => $rule) {
+        $conditions = explode('|', $rule);
+        
+        foreach ($conditions as $condition) {
+            $condition = trim($condition);
+            
+            if ($condition === 'required') {
+                if (!isset($data[$field]) || ($data[$field] === '' && $data[$field] !== 0)) {
+                    $errors[$field] = ucfirst(str_replace('_', ' ', $field)) . ' is required';
+                }
+            } elseif ($condition === 'array') {
+                if (isset($data[$field]) && !is_array($data[$field])) {
+                    $errors[$field] = ucfirst(str_replace('_', ' ', $field)) . ' must be an array';
+                }
+            } elseif ($condition === 'string') {
+                if (isset($data[$field]) && !is_string($data[$field])) {
+                    $errors[$field] = ucfirst(str_replace('_', ' ', $field)) . ' must be a string';
+                }
+            } elseif ($condition === 'numeric' || $condition === 'number') {
+                if (isset($data[$field]) && !is_numeric($data[$field])) {
+                    $errors[$field] = ucfirst(str_replace('_', ' ', $field)) . ' must be numeric';
+                }
+            }
+        }
+    }
+
+    return $errors;
 }

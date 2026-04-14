@@ -32,7 +32,7 @@ class InventoryController extends Controller
 
     private function handleGet(?string $id, ?string $action): void
     {
-        $this->requireRole(['admin', 'manager', 'stockman', 'cashier']);
+        // Public endpoint for guests to check stock levels
 
         if ($id === 'low-stock' || $id === 'alerts') {
             $threshold = (int)$this->getQuery('threshold', 10);
